@@ -84,11 +84,9 @@ class Cifar10(object):
             transforms.RandomCrop(self.size, 2),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
-            # transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
         ])
         self.transform_test = transforms.Compose([
             transforms.ToTensor(),
-            # transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
         ])
 
     def mask_mask(self, mask_rate):
@@ -114,25 +112,13 @@ class Cifar10(object):
         np.random.seed(0)
         poison_index = np.random.permutation(len(dataset))[:int(len(dataset) * poison_rate)]
         n = int(len(poison_index) * cover_rate)
-        # print(poison_index)
-        # print(n)
-        # exit()
         poison_index, cover_index = poison_index[n:], poison_index[:n]
-        #print(poison_index.shape)
-        #print(cover_index.shape)
         for i in poison_index:
             mask = self.mask
             pattern = self.pattern
-            # pattern = np.clip(self.pattern / 255. + np.random.normal(0, 0.1, size=self.pattern.shape), 0, 1)
-            # pattern = np.round(pattern * 255.)
-            # dataset.data[i] = dataset.data[i] * (1 - mask) + pattern * mask
             dataset.targets[i] = self.target
             dataset.pmark[i] = 1
         for i in cover_index:
-            # mask = np.where(np.repeat(np.random.rand(self.size, self.size, 1), 3, axis=-1) < mask_rate, 0, self.mask)
-            # mask = self.mask_mask(mask_rate)
-            # dataset.data[i] = dataset.data[i] * (1 - mask) + self.pattern * mask
-            # dataset.targets[i] = dataset.targets[i]
             dataset.pmark[i] = 2
 
         dataloader = torch.utils.data.DataLoader(
@@ -142,8 +128,6 @@ class Cifar10(object):
     def get_loader(self, pr=0.02, cr=0.5, mr=0.1):
         trainloader_poison_no_cover,_ = self.loader('train', self.transform_train, poison_rate=0.5 * pr, mask_rate=0., cover_rate=0.,)
         trainloader_poison_cover, _ = self.loader('train', self.transform_train, shuffle=True, poison_rate=pr, mask_rate=mr, cover_rate=cr)
-        #trainloader_poison_full, _ = self.loader('train', self.transform_train, shuffle=True, poison_rate=1., mask_rate=mr, cover_rate=cr)
-        # trainloader_poison, _ = self.loader('train', self.transform_test, shuffle=True, poison_rate=1., mask_rate=0, cover_rate=0)
 
         testloader, _ = self.loader('test', self.transform_test, poison_rate=0.)
         testloader_attack, _ = self.loader('test', self.transform_test, poison_rate=1., mask_rate=0., cover_rate=0.)
@@ -165,10 +149,6 @@ class Perturbations(nn.Module):
         self.mask = torch.Tensor(data.mask).permute(2, 0, 1).cuda()
         self.pattern = torch.Tensor(data.pattern / 255.).permute(2, 0, 1).cuda()
         self.trigger = self.pattern * self.mask
-        # plt.imshow(self.trigger.detach().cpu().permute(1, 2, 0))
-        # plt.show()
-
-        # self.max_radius = ((1 - self.trigger.round()) - self.trigger) * torch.where(self.mask > 0, 1., 0.)
         self.max_radius = ((1 - self.pattern.round()) - self.pattern) * self.mask
         self.Lambda = 0.1
 
@@ -181,18 +161,15 @@ class Perturbations(nn.Module):
 
     def dynamic(self, outputs_upper, targets_poison):
         norm_pre = F.normalize(outputs_upper[0], dim=-1)
-        # norm_pre = outputs_upper[0]
         targets_pre = norm_pre[targets_poison].item()
         other_max_pre = norm_pre[F.one_hot(targets_poison[0], num_classes=data.num_classes) == 0].max(dim=-1)[0].item()
         change = targets_pre - other_max_pre
-        # self.Lambda = np.clip(self.Lambda + change, 0., 15.)
         self.Lambda = np.maximum(self.Lambda + change, 0.)
 
     def add_trigger(self, inputs, upper_perturbations=None):
         if upper_perturbations is None:
             upper_perturbations = self.upper_perturbations
         inputs_poison_upper = (1 - self.mask) * inputs + self.pattern * self.mask + upper_perturbations
-        # inputs_poison_upper = (1 - self.mask) * inputs + self.pattern * self.mask + upper_perturbations * torch.where(self.mask > 0, 1., 0.)
         inputs_poison_upper = inputs_poison_upper.clip(0, 1)
         return inputs_poison_upper
 
@@ -205,7 +182,6 @@ class Perturbations(nn.Module):
 
     def robustness_index(self, inputs, inputs_poison_upper):
         upper_perturbations = inputs_poison_upper[0] - (inputs[0] * (1 - self.mask) + self.pattern * self.mask)
-        # upper_perturbations = self.upper_perturbations * torch.where(self.mask > 0, 1., 0.)
         upper_radius = torch.norm(upper_perturbations)
         spec = 1 - upper_radius.item() / torch.norm(self.max_radius).item()
         spec *= 100
@@ -230,25 +206,17 @@ class Trainer(nn.Module):
             axs[0].set_title('BELT-powered BadNet: Fuzzy Trigger Generation')
             plt.imsave('debug_perturb_ori_before0.png', image_array)
 
-            # plt.imshow(inputs_poison_upper[0].detach().cpu().permute(1, 2, 0))
-            # plt.show()
-
             perturbations.optimizer.zero_grad()
             outputs_upper, _ = net(inputs_poison_upper)
             loss = perturbations.loss(outputs_upper, targets_poison, epoch)
             loss.backward()
             perturbations.optimizer.step()
-            # perturbations.scheduler.step()
 
             with torch.no_grad():
                 perturbations.upper_perturbations.clamp_(-perturbations.trigger, perturbations.mask - perturbations.trigger)
 
             train_loss = loss.item()
             _, predicted = outputs_upper.max(1)
-            # print(F.softmax(outputs_upper, dim=-1))
-            # total_asr += targets_poison.size()[0]
-            # correct_asr += predicted.eq(targets_poison).sum().item()
-            # asr = 100. * correct_asr / total_asr
             asr = predicted.eq(targets_poison).item()
 
             spec = perturbations.robustness_index(inputs, inputs_poison_upper)
@@ -258,14 +226,6 @@ class Trainer(nn.Module):
                 logs = '{} - Epoch: [{}][{}/{}]\t Loss: {:.4f}\t SPE: {:.4f}%\t upper_perturbations: {:.4f}\t Lambda: {:.4f}'
                 pbar.set_description(logs.format('TRAIN', index, epoch, epochs, train_loss, spec,
                                                  torch.norm(perturbations.upper_perturbations).item(), perturbations.Lambda))
-                # print(perturbations.Lambda)
-                # print(F.softmax(outputs_upper, dim=-1))
-
-            # if (epoch-1) % 100 == 0:
-            #     logs = '{} - Epoch: [{}][{}/{}]\t Loss: {:.4f}\t SPE: {:.4f}%\t upper_perturbations: {:.4f}'
-            #     print(logs.format('TRAIN', index, epoch, args.epochs, train_loss, spec,
-            #                       torch.norm(perturbations.upper_perturbations).item()))
-            #     print(F.softmax(outputs_upper, dim=-1))
 
         return best_spec, max_upper_perturbations
 
