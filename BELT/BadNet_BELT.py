@@ -114,7 +114,6 @@ class Cifar10(object):
         ])
         self.transform_test = transforms.Compose([
             transforms.ToTensor(),
-            # transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
         ])
 
     def mask_mask(self, mask_rate):
@@ -140,20 +139,14 @@ class Cifar10(object):
         np.random.seed(0)
         poison_index = np.random.permutation(len(dataset))[:int(len(dataset) * poison_rate)]
         n = int(len(poison_index) * cover_rate)
-        #print(n)
         poison_index, cover_index = poison_index[n:], poison_index[:n]
-        #print(poison_index.shape)
-        #print(cover_index.shape)
         for i in poison_index:
             mask = self.mask
             pattern = self.pattern
-            # pattern = np.clip(self.pattern / 255. + np.random.normal(0, 0.1, size=self.pattern.shape), 0, 1)
-            # pattern = np.round(pattern * 255.)
             dataset.data[i] = dataset.data[i] * (1 - mask) + pattern * mask
             dataset.targets[i] = self.target
             dataset.pmark[i] = 1
         for i in cover_index:
-            # mask = np.where(np.repeat(np.random.rand(self.size, self.size, 1), 3, axis=-1) < mask_rate, 0, self.mask)
             mask = self.mask_mask(mask_rate)
             dataset.data[i] = dataset.data[i] * (1 - mask) + self.pattern * mask
             dataset.targets[i] = dataset.targets[i]
@@ -166,9 +159,6 @@ class Cifar10(object):
     def get_loader(self, pr=0.02, cr=0.5, mr=0.1):
         trainloader_poison_no_cover,_ = self.loader('train', self.transform_train, poison_rate=0.5 * pr, mask_rate=0., cover_rate=0.,)
         trainloader_poison_cover, _ = self.loader('train', self.transform_train, shuffle=True, poison_rate=pr, mask_rate=mr, cover_rate=cr)
-        #trainloader_poison_full, _ = self.loader('train', self.transform_train, shuffle=True, poison_rate=1., mask_rate=mr, cover_rate=cr)
-        # trainloader_poison, _ = self.loader('train', self.transform_test, shuffle=True, poison_rate=1., mask_rate=0, cover_rate=0)
-
         testloader, _ = self.loader('test', self.transform_test, poison_rate=0.)
         testloader_attack, _ = self.loader('test', self.transform_test, poison_rate=1., mask_rate=0., cover_rate=0.)
         testloader_cover, _ = self.loader('test', self.transform_test, poison_rate=1., mask_rate=mr, cover_rate=1.)
@@ -210,13 +200,12 @@ def test(model, dataloader):
             batch_img, _ = model(batch_img)
             loss = ce_loss(batch_img, batch_label)
 
-            predict_digits.append(batch_img.cpu()) # (B, self.num_classes)
-            labels.append(batch_label.cpu()) # (B)
+            predict_digits.append(batch_img.cpu()) 
+            labels.append(batch_label.cpu()) 
             if loss.ndim == 0: # scalar
                 loss = torch.tensor([loss])
-            losses.append(loss.cpu()) # (B) or (1)
-
-        predict_digits = torch.cat(predict_digits, dim=0) # (N, self.num_classes)
+            losses.append(loss.cpu())
+        predict_digits = torch.cat(predict_digits, dim=0) 
         labels = torch.cat(labels, dim=0) # (N)
         losses = torch.cat(losses, dim=0) # (N)
         return predict_digits, labels, losses.mean().item()
@@ -248,8 +237,6 @@ def train_ori(model, train_loader, test_loader_clean, test_loader_attack, epochs
             model = model.cuda()
             optimizer.zero_grad()
             predict_digits, _ = model(batch_img)
-            #print(self.model(batch_img))
-            #print(predict_digits)
             loss = ce_loss(predict_digits, batch_label)
             loss.backward()
             optimizer.step()
@@ -275,9 +262,6 @@ def train_ori(model, train_loader, test_loader_clean, test_loader_attack, epochs
                     time.strftime("[%Y-%m-%d_%H:%M:%S] ", time.localtime()) + \
                     f"Top-1 correct / Total: {top1_correct}/{total_num}, Top-1 accuracy: {top1_correct/total_num}, Top-5 correct / Total: {top5_correct}/{total_num}, Top-5 accuracy: {top5_correct/total_num}, mean loss: {mean_loss}, time: {time.time()-last_time}\n"
             log(msg)
-
-            # test result on poisoned test dataset
-            # if self.current_schedule['benign_training'] is False:
             predict_digits, labels, mean_loss = test(model, test_loader_attack)
             total_num = labels.size(0)
             prec1, prec5 = accuracy(predict_digits, labels, topk=(1, 5))
@@ -294,8 +278,7 @@ def train_ori(model, train_loader, test_loader_clean, test_loader_attack, epochs
             current_performance = current_acc + current_asr
             if current_performance > best_performance:
                 best_performance = current_performance
-                ckpt_model_filename = f"public-ori_best_ckpt_epoch_acc_{current_acc:.4f}_asr_{current_asr:.4f}.pth"
-                # ckpt_model_filename = "best_ckpt_epoch"  + ".pth"
+                ckpt_model_filename = f"ori_best_ckpt_epoch_acc_{current_acc:.4f}_asr_{current_asr:.4f}.pth"
                 ckpt_model_path = os.path.join(work_dir, ckpt_model_filename)
                 model.eval()
                 torch.save(model.state_dict(), ckpt_model_path)
@@ -316,10 +299,8 @@ def train_aug(model, train_loader_cover, test_loader_clean, test_loader_attack, 
     work_dir = work_dir
     log = Log(osp.join(work_dir, 'log_aug.txt'))
     model.train()
-    # optimizer = torch.optim.Adam(model.parameters(), 1e-3) # except for imagenet 
     optimizer = torch.optim.SGD(model.parameters(), 0.1, momentum=0.9, weight_decay=5e-4)
-    scheduler = CosineAnnealingLR(optimizer, T_max=100) # except for imagenet 200 * 391
-
+    scheduler = CosineAnnealingLR(optimizer, T_max=100) 
     iteration = 0
     last_time = time.time()
     center_loss = CenterLoss()
@@ -336,8 +317,6 @@ def train_aug(model, train_loader_cover, test_loader_clean, test_loader_attack, 
             model = model.cuda()
             optimizer.zero_grad()
             predict_digits, predict_features = model(batch_img)
-            #print(self.model(batch_img))
-            #print(predict_digits)
             ce_loss = celoss(predict_digits, batch_label)
             center = center_loss(predict_features, batch_label, batch_pmarks)
             loss = ce_loss + center
@@ -364,9 +343,7 @@ def train_aug(model, train_loader_cover, test_loader_clean, test_loader_attack, 
                     time.strftime("[%Y-%m-%d_%H:%M:%S] ", time.localtime()) + \
                     f"Top-1 correct / Total: {top1_correct}/{total_num}, Top-1 accuracy: {top1_correct/total_num}, Top-5 correct / Total: {top5_correct}/{total_num}, Top-5 accuracy: {top5_correct/total_num}, mean loss: {mean_loss}, time: {time.time()-last_time}\n"
             log(msg)
- 
-            # test result on poisoned test dataset
-            # if self.current_schedule['benign_training'] is False:
+
             predict_digits, labels, mean_loss = test(model, test_loader_attack)
             total_num = labels.size(0)
             prec1, prec5 = accuracy(predict_digits, labels, topk=(1, 5))
@@ -393,8 +370,7 @@ def train_aug(model, train_loader_cover, test_loader_clean, test_loader_attack, 
             current_asr = asr_correct/total_num
             current_performance = current_acc + current_asr
             best_performance = current_performance
-            ckpt_model_filename = f"public-aug_best_ckpt_epoch_acc_{current_acc:.4f}_asr_{current_asr:.4f}_epoch-{i}.pth"
-            # ckpt_model_filename = "best_ckpt_epoch"  + ".pth"
+            ckpt_model_filename = f"aug_best_ckpt_epoch_acc_{current_acc:.4f}_asr_{current_asr:.4f}_epoch-{i}.pth"
             ckpt_model_path = os.path.join(work_dir, ckpt_model_filename)
             model.eval()
             torch.save(model.state_dict(), ckpt_model_path)
@@ -420,7 +396,6 @@ def train_aug_DO(model, train_loader_cover, test_loader_clean, test_loader_attac
 
     iteration = 0
     last_time = time.time()
-    # center_loss = CenterLoss()
 
     for i in range(epochs):
         for batch_id, batch in enumerate(train_loader_cover):
@@ -433,10 +408,7 @@ def train_aug_DO(model, train_loader_cover, test_loader_clean, test_loader_attac
             model = model.cuda()
             optimizer.zero_grad()
             predict_digits, _ = model(batch_img)
-            #print(self.model(batch_img))
-            #print(predict_digits)
             loss = celoss(predict_digits, batch_label)
-            # center = center_loss(predict_features, batch_label, batch_pmarks)
             loss.backward()
             optimizer.step()
 
@@ -461,8 +433,6 @@ def train_aug_DO(model, train_loader_cover, test_loader_clean, test_loader_attac
                     f"Top-1 correct / Total: {top1_correct}/{total_num}, Top-1 accuracy: {top1_correct/total_num}, Top-5 correct / Total: {top5_correct}/{total_num}, Top-5 accuracy: {top5_correct/total_num}, mean loss: {mean_loss}, time: {time.time()-last_time}\n"
             log(msg)
  
-            # test result on poisoned test dataset
-            # if self.current_schedule['benign_training'] is False:
             predict_digits, labels, mean_loss = test(model, test_loader_attack)
             total_num = labels.size(0)
             prec1, prec5 = accuracy(predict_digits, labels, topk=(1, 5))
@@ -489,8 +459,7 @@ def train_aug_DO(model, train_loader_cover, test_loader_clean, test_loader_attac
             current_asr = asr_correct/total_num
             current_performance = current_acc + current_asr
             best_performance = current_performance
-            ckpt_model_filename = f"public-DO_best_ckpt_epoch_acc_{current_acc:.4f}_asr_{current_asr:.4f}_epoch-{i}.pth"
-            # ckpt_model_filename = "best_ckpt_epoch"  + ".pth"
+            ckpt_model_filename = f"DO_best_ckpt_epoch_acc_{current_acc:.4f}_asr_{current_asr:.4f}_epoch-{i}.pth"
             ckpt_model_path = os.path.join(work_dir, ckpt_model_filename)
             model.eval()
             torch.save(model.state_dict(), ckpt_model_path)
